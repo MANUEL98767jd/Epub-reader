@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a1a">
+  <title>Lectora</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+  <style>
+    :root {
+      --bg:       #0a0a1a;
+      --bg2:      #111128;
+      --bg3:      #1a1a35;
+      --surface:  #16163a;
+      --border:   rgba(201,168,76,.22);
+      --gold:     #c9a84c;
+      --gold-l:   #e8c96a;
+      --cream:    #f5f0e8;
+      --text:     #cdc8c0;
+      --dim:      #6e6a85;
+      --danger:   #e05252;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    html,body{height:100%;overflow:hidden;}
+    body{background:var(--bg);color:var(--text);font-family:'Lora',Georgia,serif;height:100dvh;}
+
+    ::-webkit-scrollbar{width:3px;}
+    ::-webkit-scrollbar-track{background:var(--bg2);}
+    ::-webkit-scrollbar-thumb{background:var(--gold);border-radius:2px;}
+
+    /* ─── LOADING ─── */
+    #loading{
+      position:fixed;inset:0;background:var(--bg);
+      display:none;align-items:center;justify-content:center;
+      flex-direction:column;gap:16px;z-index:9999;
+    }
+    #loading.on{display:flex;}
+    .spinner{
+      width:40px;height:40px;border:3px solid var(--bg3);
+      border-top-color:var(--gold);border-radius:50%;
+      animation:spin .8s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .loading-msg{font-size:13px;color:var(--dim);font-family:'Playfair Display',serif;}
+
+    /* ─── TOAST ─── */
+    #toast{
+      position:fixed;bottom:28px;left:50%;
+      transform:translateX(-50%) translateY(80px);
+      background:var(--bg2);border:1px solid var(--border);
+      color:var(--cream);border-radius:10px;padding:10px 20px;
+      font-size:13px;z-index:8000;
+      transition:transform .3s cubic-bezier(.4,0,.2,1);
+      pointer-events:none;white-space:nowrap;
+    }
+    #toast.on{transform:translateX(-50%) translateY(0);}
+
+    /* ─── OVERLAY ─── */
+    #panel-overlay{
+      position:fixed;inset:0;background:rgba(0,0,0,.55);
+      z-index:500;opacity:0;pointer-events:none;
+      transition:opacity .3s;
+    }
+    #panel-overlay.on{opacity:1;pointer-events:all;}
+
+    /* ══════════════════════════════════════════
+       LIBRARY
+    ══════════════════════════════════════════ */
+    #library-view{height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+
+    .lib-header{
+      padding:20px 20px 14px;
+      border-bottom:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between;
+      flex-shrink:0;
+      background:var(--bg);
+    }
+    .lib-logo{font-family:'Playfair Display',serif;font-size:26px;font-weight:700;color:var(--cream);letter-spacing:-.5px;}
+    .lib-logo span{color:var(--gold);}
+    .lib-subtitle{font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:2px;font-family:monospace;}
+
+    .add-btn{
+      background:var(--gold);color:#0a0a1a;
+      border:none;border-radius:50%;
+      width:46px;height:46px;font-size:24px;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      font-weight:700;transition:transform .15s,background .15s;
+      flex-shrink:0;
+    }
+    .add-btn:active{transform:scale(.88);background:var(--gold-l);}
+
+    #book-grid{
+      flex:1;overflow-y:auto;padding:18px 16px;
+      display:grid;grid-template-columns:repeat(2,1fr);
+      gap:14px;align-content:start;
+    }
+
+    .empty{
+      grid-column:1/-1;text-align:center;
+      padding:70px 20px;opacity:.5;
+    }
+    .empty-icon{font-size:54px;margin-bottom:14px;}
+    .empty p{font-size:14px;color:var(--dim);line-height:1.7;}
+
+    .book-card{
+      background:var(--bg2);border:1px solid var(--border);
+      border-radius:12px;overflow:hidden;cursor:pointer;
+      transition:transform .2s,border-color .2s,box-shadow .2s;
+      position:relative;
+    }
+    .book-card:active{transform:scale(.96);}
+    .book-card:hover{border-color:var(--gold);box-shadow:0 4px 20px rgba(201,168,76,.15);}
+
+    .book-cover-img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;}
+    .book-cover-ph{
+      width:100%;aspect-ratio:2/3;
+      background:linear-gradient(135deg,var(--bg3),var(--surface));
+      display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:10px;padding:12px;
+    }
+    .book-cover-ph .ph-icon{font-size:30px;opacity:.35;}
+    .book-cover-ph .ph-title{
+      font-family:'Playfair Display',serif;font-size:11px;
+      color:var(--gold);text-align:center;line-height:1.4;
+      word-break:break-word;
+    }
+    .book-info{padding:10px 12px 12px;}
+    .book-title{
+      font-family:'Playfair Display',serif;font-size:12px;
+      font-weight:600;color:var(--cream);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .book-author{
+      font-size:10px;color:var(--dim);margin-top:2px;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .book-prog{height:2px;background:var(--bg3);border-radius:1px;margin-top:7px;}
+    .book-prog-bar{height:100%;background:var(--gold);border-radius:1px;transition:width .4s;}
+
+    .del-btn{
+      position:absolute;top:7px;right:7px;
+      background:rgba(10,10,26,.88);border:1px solid rgba(224,82,82,.4);
+      color:var(--danger);border-radius:50%;
+      width:26px;height:26px;font-size:12px;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;opacity:0;transition:opacity .2s;
+    }
+    .book-card.show-del .del-btn{opacity:1;}
+
+    /* ══════════════════════════════════════════
+       READER
+    ══════════════════════════════════════════ */
+    #reader-view{display:none;height:100dvh;flex-direction:column;background:var(--bg);}
+    #reader-view.on{display:flex;}
+
+    .reader-bar{
+      background:var(--bg);border-bottom:1px solid var(--border);
+      padding:10px 12px;display:flex;align-items:center;gap:8px;
+      flex-shrink:0;z-index:10;
+    }
+    .r-btn{
+      background:none;border:none;color:var(--text);font-size:20px;
+      cursor:pointer;padding:6px;border-radius:8px;
+      display:flex;align-items:center;justify-content:center;
+      transition:background .15s,color .15s;flex-shrink:0;min-width:36px;
+    }
+    .r-btn:active{background:var(--bg3);color:var(--gold);}
+    .r-title{
+      flex:1;font-family:'Playfair Display',serif;
+      font-size:13px;color:var(--cream);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      text-align:center;
+    }
+
+    #viewer-wrap{flex:1;position:relative;overflow:hidden;}
+    #viewer{width:100%;height:100%;}
+
+    .nav-btn{
+      position:absolute;top:50%;transform:translateY(-50%);
+      width:36px;height:80px;
+      background:rgba(10,10,26,.4);
+      border:none;color:var(--gold);font-size:20px;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      z-index:5;opacity:.35;transition:opacity .2s;
+    }
+    .nav-btn:active{opacity:1;}
+    #nav-prev{left:0;border-radius:0 6px 6px 0;}
+    #nav-next{right:0;border-radius:6px 0 0 6px;}
+
+    .reader-foot{
+      background:var(--bg);border-top:1px solid var(--border);
+      padding:8px 16px;display:flex;align-items:center;gap:10px;
+      flex-shrink:0;
+    }
+    .prog-track{
+      flex:1;height:3px;background:var(--bg3);
+      border-radius:2px;cursor:pointer;position:relative;
+    }
+    .prog-fill{
+      height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-l));
+      border-radius:2px;transition:width .4s;
+    }
+    .prog-pct{font-size:10px;color:var(--dim);font-family:monospace;min-width:32px;text-align:right;}
+
+    /* ─── Highlight Menu ─── */
+    #hl-menu{
+      position:fixed;
+      background:var(--bg2);border:1px solid var(--border);
+      border-radius:14px;padding:14px 16px;
+      display:none;flex-direction:column;gap:12px;
+      z-index:700;
+      box-shadow:0 12px 40px rgba(0,0,0,.7);
+      min-width:230px;max-width:90vw;
+    }
+    #hl-menu.on{display:flex;}
+    .hl-head{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;font-family:monospace;}
+    .hl-colors{display:flex;gap:8px;align-items:center;}
+    .hl-dot{
+      width:30px;height:30px;border-radius:50%;
+      border:2.5px solid transparent;cursor:pointer;
+      transition:transform .15s,border-color .15s;
+    }
+    .hl-dot:active{transform:scale(.82);}
+    .hl-dot.sel{border-color:var(--cream);transform:scale(1.12);}
+    .hl-note-in{
+      width:100%;background:var(--bg3);border:1px solid var(--border);
+      border-radius:8px;color:var(--text);
+      font-family:'Lora',serif;font-size:12px;
+      padding:9px 11px;resize:none;min-height:52px;outline:none;
+    }
+    .hl-note-in:focus{border-color:var(--gold);}
+    .hl-actions{display:flex;gap:8px;}
+    .hl-act{
+      flex:1;background:var(--bg3);border:1px solid var(--border);
+      color:var(--text);border-radius:9px;
+      padding:8px 4px;font-size:12px;cursor:pointer;text-align:center;
+      font-family:'Lora',serif;transition:background .15s,color .15s;
+    }
+    .hl-act:active{background:var(--gold);color:#0a0a1a;border-color:var(--gold);}
+    .hl-act.warn{color:var(--danger);border-color:rgba(224,82,82,.3);}
+
+    /* ─── Side Panels ─── */
+    .panel{
+      position:fixed;top:0;right:0;height:100dvh;
+      width:min(340px,92vw);background:var(--bg2);
+      border-left:1px solid var(--border);
+      z-index:600;display:flex;flex-direction:column;
+      transform:translateX(100%);
+      transition:transform .3s cubic-bezier(.4,0,.2,1);
+    }
+    .panel.on{transform:translateX(0);}
+
+    .panel-head{
+      padding:16px 18px;border-bottom:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between;
+      flex-shrink:0;
+    }
+    .panel-ttl{font-family:'Playfair Display',serif;font-size:18px;color:var(--cream);}
+    .panel-x{background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:4px;}
+    .panel-x:active{color:var(--cream);}
+
+    .p-body{flex:1;overflow-y:auto;padding:16px 18px;}
+
+    /* Tabs */
+    .p-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+    .p-tab{
+      flex:1;padding:11px;background:none;border:none;
+      color:var(--dim);font-size:12px;cursor:pointer;text-align:center;
+      border-bottom:2px solid transparent;
+      transition:color .2s,border-color .2s;font-family:'Lora',serif;
+    }
+    .p-tab.on{color:var(--gold);border-bottom-color:var(--gold);}
+    .tab-pane{display:none;} .tab-pane.on{display:block;}
+
+    /* TOC */
+    .toc-item{
+      padding:11px 0;border-bottom:1px solid rgba(201,168,76,.08);
+      cursor:pointer;font-size:13px;color:var(--text);
+      transition:color .15s,padding-left .15s;line-height:1.4;
+    }
+    .toc-item:active{color:var(--gold);}
+    .toc-d1{padding-left:14px;font-size:12px;color:var(--dim);}
+    .toc-d2{padding-left:26px;font-size:11px;color:var(--dim);}
+
+    /* Notes */
+    .note-area{
+      width:100%;background:var(--bg3);border:1px solid var(--border);
+      border-radius:10px;color:var(--text);
+      font-family:'Lora',serif;font-size:13px;
+      padding:12px;resize:none;min-height:80px;outline:none;line-height:1.6;
+    }
+    .note-area:focus{border-color:var(--gold);}
+    .note-add-btn{
+      width:100%;background:var(--gold);color:#0a0a1a;
+      border:none;border-radius:10px;padding:11px;
+      font-family:'Playfair Display',serif;font-size:14px;font-weight:600;
+      cursor:pointer;margin-top:8px;transition:background .15s;
+    }
+    .note-add-btn:active{background:var(--gold-l);}
+    .note-card{
+      background:var(--bg3);border:1px solid var(--border);
+      border-radius:10px;padding:12px;margin-bottom:10px;
+    }
+    .note-body{font-size:13px;color:var(--text);line-height:1.6;margin-bottom:8px;word-break:break-word;}
+    .note-foot{display:flex;align-items:center;justify-content:space-between;}
+    .note-date{font-size:10px;color:var(--dim);font-family:monospace;}
+    .note-del{background:none;border:none;color:var(--danger);font-size:13px;cursor:pointer;opacity:.65;}
+
+    /* Highlights */
+    .hl-card{
+      border-radius:10px;padding:12px;margin-bottom:10px;
+      border-left:3px solid var(--gold);background:var(--bg3);
+    }
+    .hl-preview{font-size:13px;color:var(--text);line-height:1.5;font-style:italic;margin-bottom:6px;word-break:break-word;}
+    .hl-note-lbl{font-size:11px;color:var(--dim);margin-bottom:6px;}
+    .hl-foot{display:flex;align-items:center;justify-content:space-between;}
+    .goto-link{font-size:11px;color:var(--gold);cursor:pointer;text-decoration:underline;background:none;border:none;}
+
+    /* Settings */
+    .set-row{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:14px 0;border-bottom:1px solid rgba(201,168,76,.08);
+    }
+    .set-lbl{font-size:14px;color:var(--text);}
+    .set-ctrl{display:flex;align-items:center;gap:8px;}
+    .size-btn{
+      background:var(--bg3);border:1px solid var(--border);
+      color:var(--text);border-radius:8px;
+      width:34px;height:34px;font-size:17px;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      transition:background .15s;
+    }
+    .size-btn:active{background:var(--gold);color:#0a0a1a;}
+    .size-val{font-size:13px;color:var(--gold);min-width:36px;text-align:center;font-family:monospace;}
+    .s-btn{
+      background:var(--bg3);border:1px solid var(--border);
+      color:var(--text);border-radius:8px;padding:7px 11px;
+      font-size:11px;cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+    }
+    .s-btn.on{background:var(--gold);color:#0a0a1a;border-color:var(--gold);}
+
+    /* stats badge */
+    .stat-badge{
+      display:inline-flex;align-items:center;gap:5px;
+      background:var(--bg3);border:1px solid var(--border);
+      border-radius:20px;padding:4px 10px;
+      font-size:10px;color:var(--dim);font-family:monospace;
+    }
+
+    /* divider */
+    .divider{height:1px;background:var(--border);margin:12px 0;}
+
+    /* search in toc */
+    .toc-search{
+      width:100%;background:var(--bg3);border:1px solid var(--border);
+      border-radius:8px;color:var(--text);font-size:13px;
+      padding:9px 12px;outline:none;margin-bottom:12px;font-family:'Lora',serif;
+    }
+    .toc-search:focus{border-color:var(--gold);}
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading"><div class="spinner"></div><p class="loading-msg" id="load-msg">Cargando...</p></div>
+
+<!-- Toast -->
+<div id="toast" id="toast"></div>
+
+<!-- Overlay -->
+<div id="panel-overlay"></div>
+
+<!-- ══ LIBRARY ══ -->
+<div id="library-view">
+  <div class="lib-header">
+    <div>
+      <div class="lib-logo">Lec<span>tora</span></div>
+      <div class="lib-subtitle">Tu biblioteca EPUB</div>
+    </div>
+    <button class="add-btn" id="add-btn" title="Agregar libro">+</button>
+    <input type="file" id="file-in" accept=".epub" style="display:none">
+  </div>
+  <div id="book-grid">
+    <div class="empty">
+      <div class="empty-icon">📚</div>
+      <p>Tu biblioteca está vacía.<br>Toca <strong style="color:var(--gold)">+</strong> para agregar un EPUB.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ READER ══ -->
+<div id="reader-view">
+  <div class="reader-bar">
+    <button class="r-btn" id="r-back">◀</button>
+    <div class="r-title" id="r-title">—</div>
+    <button class="r-btn" id="r-toc" title="Índice">☰</button>
+    <button class="r-btn" id="r-notes" title="Notas">✎</button>
+    <button class="r-btn" id="r-set" title="Ajustes">⚙</button>
+  </div>
+
+  <div id="viewer-wrap">
+    <div id="viewer"></div>
+    <button class="nav-btn" id="nav-prev">‹</button>
+    <button class="nav-btn" id="nav-next">›</button>
+  </div>
+
+  <div class="reader-foot">
+    <div class="prog-track" id="prog-track">
+      <div class="prog-fill" id="prog-fill" style="width:0%"></div>
+    </div>
+    <div class="prog-pct" id="prog-pct">0%</div>
+  </div>
+</div>
+
+<!-- ══ HIGHLIGHT MENU ══ -->
+<div id="hl-menu">
+  <div class="hl-head">✦ Subrayar texto</div>
+  <div class="hl-colors">
+    <button class="hl-dot sel" data-c="yellow" style="background:#ffe066" title="Amarillo"></button>
+    <button class="hl-dot" data-c="green"  style="background:#4ade80" title="Verde"></button>
+    <button class="hl-dot" data-c="blue"   style="background:#93c5fd" title="Azul"></button>
+    <button class="hl-dot" data-c="pink"   style="background:#f9a8d4" title="Rosa"></button>
+    <button class="hl-dot" data-c="orange" style="background:#fdba74" title="Naranja"></button>
+    <button class="hl-dot" data-c="purple" style="background:#c4b5fd" title="Morado"></button>
+  </div>
+  <textarea class="hl-note-in" id="hl-note-in" placeholder="Nota al subrayado (opcional)…" rows="2"></textarea>
+  <div class="hl-actions">
+    <button class="hl-act" id="hl-ok">✓ Subrayar</button>
+    <button class="hl-act warn" id="hl-cancel">✕ Cancelar</button>
+  </div>
+</div>
+
+<!-- ══ PANEL: TOC ══ -->
+<div class="panel" id="panel-toc">
+  <div class="panel-head">
+    <div class="panel-ttl">Índice</div>
+    <button class="panel-x" data-close="panel-toc">✕</button>
+  </div>
+  <div class="p-body">
+    <input class="toc-search" id="toc-search" placeholder="Buscar capítulo…">
+    <div id="toc-list"><p style="color:var(--dim);font-size:13px;">Cargando…</p></div>
+  </div>
+</div>
+
+<!-- ══ PANEL: NOTES + HIGHLIGHTS ══ -->
+<div class="panel" id="panel-notes">
+  <div class="panel-head">
+    <div class="panel-ttl">Anotaciones</div>
+    <button class="panel-x" data-close="panel-notes">✕</button>
+  </div>
+  <div class="p-tabs">
+    <button class="p-tab on" data-tab="tab-notes">Notas</button>
+    <button class="p-tab" data-tab="tab-hl">Subrayados</button>
+  </div>
+  <div class="p-body">
+    <div class="tab-pane on" id="tab-notes">
+      <textarea class="note-area" id="new-note" placeholder="Escribe una nota…"></textarea>
+      <button class="note-add-btn" id="note-add">+ Agregar nota</button>
+      <div class="divider"></div>
+      <div id="notes-list"></div>
+    </div>
+    <div class="tab-pane" id="tab-hl">
+      <div id="hl-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PANEL: SETTINGS ══ -->
+<div class="panel" id="panel-set">
+  <div class="panel-head">
+    <div class="panel-ttl">Ajustes de lectura</div>
+    <button class="panel-x" data-close="panel-set">✕</button>
+  </div>
+  <div class="p-body">
+    <div class="set-row">
+      <span class="set-lbl">Tamaño del texto</span>
+      <div class="set-ctrl">
+        <button class="size-btn" id="sz-dn">−</button>
+        <span class="size-val" id="sz-val">100%</span>
+        <button class="size-btn" id="sz-up">+</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">Tema</span>
+      <div class="set-ctrl">
+        <button class="s-btn on" data-theme="dark">Oscuro</button>
+        <button class="s-btn" data-theme="sepia">Sepia</button>
+        <button class="s-btn" data-theme="light">Claro</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">Tipo de letra</span>
+      <div class="set-ctrl">
+        <button class="s-btn on" data-font="serif">Serif</button>
+        <button class="s-btn" data-font="sans">Sans</button>
+        <button class="s-btn" data-font="mono">Mono</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">Interlineado</span>
+      <div class="set-ctrl">
+        <button class="s-btn on" data-lh="1.6">Normal</button>
+        <button class="s-btn" data-lh="2">Amplio</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">Ancho de texto</span>
+      <div class="set-ctrl">
+        <button class="s-btn on" data-mw="100">Completo</button>
+        <button class="s-btn" data-mw="700px">Centrado</button>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div id="book-stats" style="padding-top:4px;"></div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   DB
+   ========================================================= */
+const DB_NAME='LectoraDB', DB_VER=1;
+let DB;
+
+async function openDB(){
+  return new Promise((ok,err)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('books')){
+        const s=d.createObjectStore('books',{keyPath:'id',autoIncrement:true});
+        s.createIndex('title','title',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('highlights')){
+        const s=d.createObjectStore('highlights',{keyPath:'id',autoIncrement:true});
+        s.createIndex('bookId','bookId',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('notes')){
+        const s=d.createObjectStore('notes',{keyPath:'id',autoIncrement:true});
+        s.createIndex('bookId','bookId',{unique:false});
+      }
+    };
+    r.onsuccess=()=>ok(r.result);
+    r.onerror=()=>err(r.error);
+  });
+}
+
+const tx=(store,mode='readonly')=>DB.transaction(store,mode).objectStore(store);
+
+const dbGet=(s,k)=>new Promise((ok,er)=>{const r=tx(s).get(k);r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error);});
+const dbAll=(s)=>new Promise((ok,er)=>{const r=tx(s).getAll();r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error);});
+const dbIdx=(s,i,v)=>new Promise((ok,er)=>{const r=tx(s).index(i).getAll(v);r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error);});
+const dbAdd=(s,d)=>new Promise((ok,er)=>{const r=tx(s,'readwrite').add(d);r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error);});
+const dbPut=(s,d)=>new Promise((ok,er)=>{const r=tx(s,'readwrite').put(d);r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error);});
+const dbDel=(s,k)=>new Promise((ok,er)=>{const r=tx(s,'readwrite').delete(k);r.onsuccess=()=>ok();r.onerror=()=>er(r.error);});
+
+/* =========================================================
+   STATE
+   ========================================================= */
+let curBook=null, curRend=null, curBookId=null;
+let selCfi=null, selText='';
+let hlColor='yellow';
+let fontSize=100, curTheme='dark', curFont='serif', curLH='1.6', curMW='100';
+
+/* =========================================================
+   UI HELPERS
+   ========================================================= */
+function toast(msg,dur=2500){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('on');
+  setTimeout(()=>el.classList.remove('on'),dur);
+}
+function loading(msg='Cargando…'){
+  document.getElementById('load-msg').textContent=msg;
+  document.getElementById('loading').classList.add('on');
+}
+function doneLoad(){document.getElementById('loading').classList.remove('on');}
+
+function dateFmt(ts){return new Date(ts).toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});}
+
+/* Panels */
+function openPanel(id){
+  closeAll();
+  document.getElementById(id).classList.add('on');
+  document.getElementById('panel-overlay').classList.add('on');
+}
+function closeAll(){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('panel-overlay').classList.remove('on');
+  document.getElementById('hl-menu').classList.remove('on');
+}
+
+document.querySelectorAll('.panel-x').forEach(b=>{
+  b.addEventListener('click',()=>closeAll());
+});
+document.getElementById('panel-overlay').addEventListener('click',closeAll);
+
+/* Panel Tabs */
+document.querySelectorAll('.p-tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    const id=t.dataset.tab;
+    t.closest('.panel').querySelectorAll('.p-tab').forEach(x=>x.classList.remove('on'));
+    t.closest('.panel').querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');
+    document.getElementById(id).classList.add('on');
+  });
+});
+
+/* =========================================================
+   LIBRARY
+   ========================================================= */
+async function loadLibrary(){
+  const books=await dbAll('books');
+  const grid=document.getElementById('book-grid');
+  if(!books.length){
+    grid.innerHTML=`<div class="empty"><div class="empty-icon">📚</div><p>Tu biblioteca está vacía.<br>Toca <strong style="color:var(--gold)">+</strong> para agregar un EPUB.</p></div>`;
+    return;
+  }
+  grid.innerHTML='';
+  books.forEach(b=>{
+    const prog=b.progress||0;
+    const card=document.createElement('div');
+    card.className='book-card'; card.dataset.id=b.id;
+
+    const cover=b.coverBase64
+      ?`<img class="book-cover-img" src="${b.coverBase64}" alt="${b.title}" loading="lazy">`
+      :`<div class="book-cover-ph"><span class="ph-icon">📖</span><span class="ph-title">${b.title}</span></div>`;
+
+    card.innerHTML=`
+      ${cover}
+      <button class="del-btn" title="Eliminar">✕</button>
+      <div class="book-info">
+        <div class="book-title">${b.title}</div>
+        <div class="book-author">${b.author||'Autor desconocido'}</div>
+        <div class="book-prog"><div class="book-prog-bar" style="width:${prog}%"></div></div>
+      </div>`;
+
+    /* Long press → show delete */
+    let pt;
+    card.addEventListener('touchstart',()=>{pt=setTimeout(()=>card.classList.add('show-del'),500);},{passive:true});
+    card.addEventListener('touchend',()=>clearTimeout(pt),{passive:true});
+    card.addEventListener('touchmove',()=>clearTimeout(pt),{passive:true});
+
+    card.addEventListener('click',e=>{
+      if(e.target.classList.contains('del-btn')) return;
+      card.classList.remove('show-del');
+      openBook(b.id);
+    });
+
+    card.querySelector('.del-btn').addEventListener('click',async e=>{
+      e.stopPropagation();
+      if(confirm(`¿Eliminar "${b.title}"?\nSe borrarán también sus notas y subrayados.`)){
+        await deleteBook(b.id);
+      }
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+async function deleteBook(id){
+  await dbDel('books',id);
+  const hls=await dbIdx('highlights','bookId',id);
+  for(const h of hls) await dbDel('highlights',h.id);
+  const ns=await dbIdx('notes','bookId',id);
+  for(const n of ns) await dbDel('notes',n.id);
+  toast('Libro eliminado');
+  loadLibrary();
+}
+
+/* ─── Upload ─── */
+document.getElementById('add-btn').addEventListener('click',()=>document.getElementById('file-in').click());
+
+document.getElementById('file-in').addEventListener('change',async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  e.target.value='';
+  loading('Procesando EPUB…');
+  try{
+    /* Leer y guardar como Uint8Array para evitar buffers detached en IndexedDB */
+    const rawBuf = await file.arrayBuffer();
+    const bytes = new Uint8Array(rawBuf);
+
+    /* Inicializar epub.js con open() separado (más robusto que ePub(buf)) */
+    const tmp = ePub();
+    tmp.open(bytes.buffer.slice(0));
+
+    /* Esperar ready con timeout */
+    await Promise.race([
+      tmp.ready,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))
+    ]);
+
+    /* Metadatos */
+    const meta = tmp.package && tmp.package.metadata ? tmp.package.metadata : {};
+    const title = (meta.title || file.name).replace(/\.epub$/i,'');
+    const author = meta.creator || '';
+
+    /* Portada — fallo silencioso */
+    let coverB64 = null;
+    try{
+      const covUrl = await Promise.race([
+        tmp.coverUrl(),
+        new Promise(r=>setTimeout(()=>r(null),5000))
+      ]);
+      if(covUrl && typeof covUrl==='string' && covUrl.length>4){
+        const res = await fetch(covUrl);
+        const blob = await res.blob();
+        if(blob.size>0){
+          coverB64 = await new Promise(r=>{
+            const fr=new FileReader();
+            fr.onload=()=>r(fr.result);
+            fr.onerror=()=>r(null);
+            fr.readAsDataURL(blob);
+          });
+        }
+      }
+    }catch(_){}
+
+    tmp.destroy();
+
+    /* Guardar bytes — Uint8Array persiste correctamente en IndexedDB */
+    await dbAdd('books',{
+      title, author, coverBase64: coverB64,
+      data: bytes,
+      progress:0, lastCfi:null, dateAdded:Date.now()
+    });
+    doneLoad();
+    toast(`"​${title}" agregado ✓`);
+    loadLibrary();
+  }catch(err){
+    doneLoad();
+    const msg = err.message==='timeout'
+      ? 'El archivo tardó demasiado, intenta de nuevo'
+      : 'Archivo EPUB no válido o dañado';
+    toast(msg);
+    console.error('[Lectora upload]', err);
+  }
+});
+
+/* =========================================================
+   READER
+   ========================================================= */
+async function openBook(bookId){
+  loading('Abriendo libro…');
+  try{
+    const bk=await dbGet('books',bookId);
+    if(!bk){doneLoad();toast('No se pudo abrir');return;}
+
+    curBookId=bookId;
+    document.getElementById('library-view').style.display='none';
+    document.getElementById('reader-view').classList.add('on');
+    document.getElementById('r-title').textContent=bk.title;
+
+    if(curRend){curRend.destroy();curRend=null;}
+    if(curBook){curBook.destroy();curBook=null;}
+
+    document.getElementById('viewer').innerHTML='';
+
+    /* bk.data es Uint8Array; reconstruir ArrayBuffer fresco */
+    const bookBuf = bk.data instanceof Uint8Array
+      ? bk.data.buffer.slice(bk.data.byteOffset, bk.data.byteOffset + bk.data.byteLength)
+      : bk.data.slice(0);
+    curBook = ePub();
+    curBook.open(bookBuf);
+    await Promise.race([
+      curBook.ready,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),20000))
+    ]);
+
+    curRend=curBook.renderTo('viewer',{width:'100%',height:'100%',spread:'none',flow:'paginated'});
+
+    /* inject highlight CSS via hooks */
+    curRend.hooks.content.register(contents=>{
+      const style=document.createElement('style');
+      style.textContent=`
+        .hl-yellow{background:rgba(255,224,102,.45)!important;border-radius:2px;}
+        .hl-green {background:rgba(74,222,128,.38)!important;border-radius:2px;}
+        .hl-blue  {background:rgba(147,197,253,.42)!important;border-radius:2px;}
+        .hl-pink  {background:rgba(249,168,212,.42)!important;border-radius:2px;}
+        .hl-orange{background:rgba(253,186,116,.42)!important;border-radius:2px;}
+        .hl-purple{background:rgba(196,181,253,.42)!important;border-radius:2px;}
+      `;
+      contents.document.head.appendChild(style);
+    });
+
+    applyTheme(curTheme,false);
+    applyFontSize(fontSize,false);
+
+    await curBook.locations.generate(1600);
+
+    if(bk.lastCfi) await curRend.display(bk.lastCfi);
+    else await curRend.display();
+
+    /* progress tracking */
+    curRend.on('relocated',async loc=>{
+      try{
+        const pct=curBook.locations.percentageFromCfi(loc.start.cfi)||0;
+        const p=Math.round(pct*100);
+        document.getElementById('prog-fill').style.width=p+'%';
+        document.getElementById('prog-pct').textContent=p+'%';
+        const saved=await dbGet('books',curBookId);
+        if(saved){saved.progress=p;saved.lastCfi=loc.start.cfi;await dbPut('books',saved);}
+      }catch(_){}
+    });
+
+    /* selection → highlight menu */
+    curRend.on('selected',(cfiRange,contents)=>{
+      const sel=contents.window.getSelection();
+      if(!sel||sel.isCollapsed) return;
+      const txt=sel.toString().trim();
+      if(!txt||txt.length<2) return;
+      selCfi=cfiRange; selText=txt;
+      showHlMenu();
+    });
+
+    /* keyboard nav */
+    curRend.on('keyup',e=>{
+      if(e.key==='ArrowRight'||e.key==='ArrowDown') curRend.next();
+      if(e.key==='ArrowLeft'||e.key==='ArrowUp') curRend.prev();
+    });
+
+    await restoreHighlights(bookId);
+    loadToc();
+    updateStats(bk);
+    doneLoad();
+  }catch(err){
+    doneLoad(); toast('Error al abrir el libro'); console.error(err);
+    goLibrary();
+  }
+}
+
+function goLibrary(){
+  closeAll();
+  if(curRend){curRend.destroy();curRend=null;}
+  if(curBook){curBook.destroy();curBook=null;}
+  curBookId=null;
+  document.getElementById('reader-view').classList.remove('on');
+  document.getElementById('library-view').style.display='flex';
+  loadLibrary();
+}
+
+/* ─── Navigation ─── */
+document.getElementById('nav-prev').addEventListener('click',()=>curRend?.prev());
+document.getElementById('nav-next').addEventListener('click',()=>curRend?.next());
+document.getElementById('r-back').addEventListener('click',()=>goLibrary());
+
+/* Swipe */
+let tx0=0,ty0=0;
+document.getElementById('viewer-wrap').addEventListener('touchstart',e=>{tx0=e.touches[0].clientX;ty0=e.touches[0].clientY;},{passive:true});
+document.getElementById('viewer-wrap').addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-tx0;
+  const dy=e.changedTouches[0].clientY-ty0;
+  if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.5){
+    if(dx<0) curRend?.next(); else curRend?.prev();
+  }
+},{passive:true});
+
+/* Progress bar seek */
+document.getElementById('prog-track').addEventListener('click',e=>{
+  if(!curBook||!curRend) return;
+  const r=e.currentTarget.getBoundingClientRect();
+  const pct=(e.clientX-r.left)/r.width;
+  const cfi=curBook.locations.cfiFromPercentage(Math.max(0,Math.min(1,pct)));
+  if(cfi) curRend.display(cfi);
+});
+
+/* ─── Theme / Font ─── */
+const THEMES={
+  dark:{
+    'body':{'background':'#0a0a1a !important','color':'#cdc8c0 !important'},
+    'p':{'color':'#cdc8c0'},
+    'a':{'color':'#c9a84c'}
+  },
+  sepia:{
+    'body':{'background':'#f4ecd8 !important','color':'#3b2f1e !important'},
+    'a':{'color':'#8b5e3c'}
+  },
+  light:{
+    'body':{'background':'#ffffff !important','color':'#1a1a2e !important'},
+    'a':{'color':'#2563eb'}
+  }
+};
+
+function applyTheme(theme,redisplay=true){
+  curTheme=theme;
+  if(!curRend) return;
+  curRend.themes.register('th',THEMES[theme]||THEMES.dark);
+  curRend.themes.select('th');
+  document.querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('on',b.dataset.theme===theme));
+}
+
+function applyFontSize(sz,redisplay=true){
+  fontSize=sz;
+  if(!curRend) return;
+  curRend.themes.fontSize(sz+'%');
+  document.getElementById('sz-val').textContent=sz+'%';
+}
+
+document.getElementById('sz-up').addEventListener('click',()=>{if(fontSize<220)applyFontSize(fontSize+10);});
+document.getElementById('sz-dn').addEventListener('click',()=>{if(fontSize>50)applyFontSize(fontSize-10);});
+
+document.querySelectorAll('[data-theme]').forEach(b=>{
+  b.addEventListener('click',()=>applyTheme(b.dataset.theme));
+});
+
+document.querySelectorAll('[data-font]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    curFont=b.dataset.font;
+    document.querySelectorAll('[data-font]').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    if(curRend){
+      const fam=curFont==='serif'?"'Lora',Georgia,serif":curFont==='sans'?"'Helvetica Neue',Arial,sans-serif":"'Courier New',monospace";
+      curRend.themes.override('font-family',fam);
+    }
+  });
+});
+
+document.querySelectorAll('[data-lh]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    curLH=b.dataset.lh;
+    document.querySelectorAll('[data-lh]').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    if(curRend) curRend.themes.override('line-height',curLH);
+  });
+});
+
+document.querySelectorAll('[data-mw]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    curMW=b.dataset.mw;
+    document.querySelectorAll('[data-mw]').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    if(curRend){
+      const mw=curMW==='100'?'100%':curMW;
+      curRend.themes.override('max-width',mw);
+      curRend.themes.override('margin','0 auto');
+    }
+  });
+});
+
+/* ─── Stats ─── */
+function updateStats(bk){
+  const el=document.getElementById('book-stats');
+  el.innerHTML=`
+    <p style="font-size:11px;color:var(--dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;font-family:monospace;">Estadísticas del libro</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      <span class="stat-badge">📅 ${dateFmt(bk.dateAdded)}</span>
+      <span class="stat-badge">📖 ${bk.progress||0}% leído</span>
+    </div>`;
+}
+
+/* =========================================================
+   TOC
+   ========================================================= */
+let tocItems=[];
+async function loadToc(){
+  if(!curBook) return;
+  const toc=curBook.navigation.toc||[];
+  tocItems=[];
+  const container=document.getElementById('toc-list');
+  if(!toc.length){container.innerHTML='<p style="color:var(--dim);font-size:13px;">Sin índice disponible.</p>';return;}
+
+  function flatToc(items,depth=0){
+    items.forEach(it=>{
+      tocItems.push({label:it.label.trim(),href:it.href,depth});
+      if(it.subitems?.length) flatToc(it.subitems,depth+1);
+    });
+  }
+  flatToc(toc);
+  renderTocList(tocItems);
+}
+
+function renderTocList(items){
+  const c=document.getElementById('toc-list'); c.innerHTML='';
+  items.forEach(it=>{
+    const d=document.createElement('div');
+    d.className='toc-item'+(it.depth===1?' toc-d1':it.depth>=2?' toc-d2':'');
+    d.textContent=it.label;
+    d.addEventListener('click',()=>{
+      if(curRend) curRend.display(it.href);
+      closeAll();
+    });
+    c.appendChild(d);
+  });
+}
+
+document.getElementById('toc-search').addEventListener('input',e=>{
+  const q=e.target.value.trim().toLowerCase();
+  renderTocList(q?tocItems.filter(i=>i.label.toLowerCase().includes(q)):tocItems);
+});
+
+/* =========================================================
+   HIGHLIGHTS
+   ========================================================= */
+const COLOR_HEX={yellow:'#ffe066',green:'#4ade80',blue:'#93c5fd',pink:'#f9a8d4',orange:'#fdba74',purple:'#c4b5fd'};
+
+function showHlMenu(){
+  const m=document.getElementById('hl-menu');
+  document.getElementById('hl-note-in').value='';
+  m.style.top='50%'; m.style.left='50%';
+  m.style.transform='translate(-50%,-50%)';
+  m.classList.add('on');
+}
+
+document.querySelectorAll('.hl-dot').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.hl-dot').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel'); hlColor=b.dataset.c;
+  });
+});
+
+document.getElementById('hl-cancel').addEventListener('click',()=>{
+  closeAll(); clearSel();
+});
+
+document.getElementById('hl-ok').addEventListener('click',async()=>{
+  if(!selCfi||!curBookId){closeAll();return;}
+  const note=document.getElementById('hl-note-in').value.trim();
+  try{
+    curRend.annotations.highlight(selCfi,{},()=>{},`hl-${hlColor}`);
+    await dbAdd('highlights',{bookId:curBookId,cfi:selCfi,text:selText,color:hlColor,note,dateAdded:Date.now()});
+    toast('Subrayado guardado ✓');
+  }catch(err){toast('Error al subrayar');console.error(err);}
+  closeAll(); clearSel();
+});
+
+function clearSel(){
+  selCfi=null; selText='';
+  try{curRend?.getContents().forEach(c=>c.window.getSelection?.().removeAllRanges());}catch(_){}
+}
+
+async function restoreHighlights(bookId){
+  if(!curRend) return;
+  const hls=await dbIdx('highlights','bookId',bookId);
+  hls.forEach(h=>{
+    try{curRend.annotations.highlight(h.cfi,{},()=>{},`hl-${h.color}`);}catch(_){}
+  });
+}
+
+async function renderHlList(){
+  const hls=await dbIdx('highlights','bookId',curBookId);
+  const c=document.getElementById('hl-list');
+  if(!hls.length){c.innerHTML='<p style="color:var(--dim);font-size:13px;padding-top:6px;">Sin subrayados todavía.</p>';return;}
+  c.innerHTML='';
+  hls.slice().reverse().forEach(h=>{
+    const d=document.createElement('div');
+    d.className='hl-card'; d.style.borderLeftColor=COLOR_HEX[h.color]||'#ffe066';
+    d.innerHTML=`
+      <div class="hl-preview">"${h.text.slice(0,130)}${h.text.length>130?'…':''}"</div>
+      ${h.note?`<div class="hl-note-lbl">📝 ${h.note}</div>`:''}
+      <div class="hl-foot">
+        <span class="note-date">${dateFmt(h.dateAdded)}</span>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="goto-link" data-cfi="${h.cfi}">Ir →</button>
+          <button class="note-del" data-id="${h.id}">🗑</button>
+        </div>
+      </div>`;
+    d.querySelector('.goto-link').addEventListener('click',()=>{curRend?.display(h.cfi);closeAll();});
+    d.querySelector('.note-del').addEventListener('click',async()=>{
+      await dbDel('highlights',h.id);
+      try{curRend.annotations.remove(h.cfi,'highlight');}catch(_){}
+      toast('Subrayado eliminado'); renderHlList();
+    });
+    c.appendChild(d);
+  });
+}
+
+/* =========================================================
+   NOTES
+   ========================================================= */
+document.getElementById('note-add').addEventListener('click',async()=>{
+  const txt=document.getElementById('new-note').value.trim();
+  if(!txt||!curBookId) return;
+  let cfi=null;
+  try{const loc=await curRend?.currentLocation();cfi=loc?.start?.cfi||null;}catch(_){}
+  await dbAdd('notes',{bookId:curBookId,text:txt,cfi,dateAdded:Date.now()});
+  document.getElementById('new-note').value='';
+  toast('Nota guardada ✓'); renderNotesList();
+});
+
+async function renderNotesList(){
+  const ns=await dbIdx('notes','bookId',curBookId);
+  const c=document.getElementById('notes-list');
+  if(!ns.length){c.innerHTML='<p style="color:var(--dim);font-size:13px;padding-top:4px;">Sin notas todavía.</p>';return;}
+  c.innerHTML='';
+  ns.slice().reverse().forEach(n=>{
+    const d=document.createElement('div');
+    d.className='note-card';
+    d.innerHTML=`
+      <div class="note-body">${n.text}</div>
+      <div class="note-foot">
+        <span class="note-date">${dateFmt(n.dateAdded)}</span>
+        <div style="display:flex;gap:10px;align-items:center;">
+          ${n.cfi?`<button class="goto-link" data-cfi="${n.cfi}">Ir →</button>`:''}
+          <button class="note-del" data-id="${n.id}">🗑</button>
+        </div>
+      </div>`;
+    if(n.cfi) d.querySelector('.goto-link').addEventListener('click',()=>{curRend?.display(n.cfi);closeAll();});
+    d.querySelector('.note-del').addEventListener('click',async()=>{await dbDel('notes',n.id);toast('Nota eliminada');renderNotesList();});
+    c.appendChild(d);
+  });
+}
+
+/* =========================================================
+   TOOLBAR BUTTONS
+   ========================================================= */
+document.getElementById('r-toc').addEventListener('click',()=>{loadToc();openPanel('panel-toc');});
+document.getElementById('r-notes').addEventListener('click',async()=>{
+  if(curBookId){await renderNotesList();await renderHlList();}
+  openPanel('panel-notes');
+  /* reset to notes tab */
+  document.querySelectorAll('.p-tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.tab-pane').forEach(t=>t.classList.remove('on'));
+  document.querySelector('[data-tab="tab-notes"]').classList.add('on');
+  document.getElementById('tab-notes').classList.add('on');
+});
+document.getElementById('r-set').addEventListener('click',async()=>{
+  if(curBookId){const bk=await dbGet('books',curBookId);if(bk)updateStats(bk);}
+  openPanel('panel-set');
+});
+
+/* =========================================================
+   INIT
+   ========================================================= */
+(async()=>{
+  loading('Iniciando Lectora…');
+  DB=await openDB();
+  await loadLibrary();
+  doneLoad();
+  document.getElementById('library-view').style.display='flex';
+})();
+</script>
+</body>
+</html>
